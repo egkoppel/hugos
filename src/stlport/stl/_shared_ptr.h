@@ -175,6 +175,15 @@ template<class T> class shared_ptr {
 			return *this;
 		}
 
+		shared_ptr& operator=(shared_ptr& r) noexcept {
+			this->reset();
+			this->state = r.state;
+			this->ptr = r.ptr;
+			if (this->state != nullptr) {
+				atomic_fetch_add(&this->state->strong_count, 1);
+			}
+		}
+
 		void swap(shared_ptr& r) noexcept {
 			shared_ptr_state *tmp_state = this->state;
 			T *tmp_ptr = this->ptr;

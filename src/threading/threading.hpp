@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <deque>
 #include <stdint.h>
 #include <stdatomic.h>
 #include "../memory/stack.hpp"
@@ -17,7 +18,9 @@ namespace threads {
 	std::shared_ptr<Task> init_multitasking(uint64_t stack_bottom, uint64_t stack_top);
 
 	enum class task_state {
-		RUNNING
+		RUNNING,
+		READY,
+		BLOCKED
 	};
 
 	extern "C" struct Task {
@@ -30,8 +33,8 @@ namespace threads {
 		task_state state;
 
 		public:
-		Task(std::string name, uint64_t p4_page_table = create_p4_table(global_frame_allocator)): pid(atomic_fetch_add(&next_pid, 1)), name(std::move(name)), state(task_state::RUNNING), stack(40*1024), p4_page_table(p4_page_table), stack_ptr(this->stack.top - 8*8 /* 8 uint64_t get popped off on entry - 6 regs + 2 return */) {}
-		Task(std::string name, uint64_t p4_page_table, uint64_t stack_top, uint64_t stack_bottom): pid(atomic_fetch_add(&next_pid, 1)), name(std::move(name)), state(task_state::RUNNING), stack(stack_top, stack_bottom), p4_page_table(p4_page_table), stack_ptr(0) {}
+		Task(std::string name, uint64_t p4_page_table = create_p4_table(global_frame_allocator)): pid(atomic_fetch_add(&next_pid, 1)), name(std::move(name)), state(task_state::READY), stack(40*1024), p4_page_table(p4_page_table), stack_ptr(this->stack.top - 8*8 /* 8 uint64_t get popped off on entry - 6 regs + 2 return */) {}
+		Task(std::string name, uint64_t p4_page_table, uint64_t stack_top, uint64_t stack_bottom): pid(atomic_fetch_add(&next_pid, 1)), name(std::move(name)), state(task_state::READY), stack(stack_top, stack_bottom), p4_page_table(p4_page_table), stack_ptr(0) {}
 
 		public:
 		uint64_t get_pid() { return pid; }
@@ -49,13 +52,13 @@ namespace threads {
 		friend class SchedulerLock;
 		private:
 		std::vector<std::shared_ptr<Task>> tasks;
-		std::vector<std::shared_ptr<Task>> running_tasks;
-		size_t current_task_index = 0;
+		std::deque<std::shared_ptr<Task>> running_tasks;
 		int IRQ_disable_counter = 0;
 
 		void print_tasks();
 		void add_task(std::shared_ptr<Task>);
 		void schedule();
+		void block(task_state);
 
 		public:
 		SchedulerLock lock();
@@ -72,6 +75,7 @@ namespace threads {
 		void print_tasks();
 		void add_task(std::shared_ptr<Task>);
 		void schedule();
+		void block(task_state);
 	};
 
 	extern Scheduler scheduler;

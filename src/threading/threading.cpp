@@ -1,4 +1,5 @@
 #include "threading.hpp"
+#include <assert.h>
 
 using namespace threads;
 
@@ -7,12 +8,21 @@ atomic_uint_fast64_t threads::next_pid = 1;
 Scheduler threads::scheduler = Scheduler();
 
 extern "C" void task_init(void);
-extern "C" void task_switch(Task *new_task);
-extern "C" Task* current_task_ptr = nullptr;
+extern "C" void task_switch(std::shared_ptr<Task> *new_task);
+std::shared_ptr<Task> current_task_ptr;
+
+extern "C" Task* current_task_ptr_read() {
+	return current_task_ptr.get();
+}
+
+extern "C" void current_task_ptr_write(std::shared_ptr<Task> *t) {
+	current_task_ptr = *t;
+}
 
 void Scheduler::print_tasks() {
 	for (auto& task : tasks) {
-		printf("%lli: %s\n", task->get_pid(), task->get_name().c_str());
+		auto state = task->get_state();
+		printf("%lli: %s - %s\n", task->get_pid(), task->get_name().c_str(), state == task_state::RUNNING ? "RUNNING" : "BLOCKED");
 	}
 }
 
@@ -37,21 +47,29 @@ std::shared_ptr<Task> threads::init_multitasking(uint64_t stack_bottom, uint64_t
 	uint64_t cr3;
 	__asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 	auto kernel_task = std::make_shared<threads::Task>("kernel_task", cr3, stack_top, stack_top);
-	current_task_ptr = kernel_task.get();
+	current_task_ptr = kernel_task;
 	scheduler.lock().add_task(kernel_task);
 	return kernel_task;
 }
 
 void Scheduler::schedule() {
-	if (running_tasks.size() == 1) return; // Only one task - don't need to switch
-	current_task_index++;
-	if (current_task_index >= running_tasks.size()) current_task_index = 0;
-	task_switch(running_tasks[current_task_index].get());
+	if (running_tasks.size() == 0) return; // Only one task - don't need to switch
+
+	auto new_task = running_tasks[0]; // Get first task
+	running_tasks.pop_front();
+
+	running_tasks.push_back(current_task_ptr);
+	
+	task_switch(&new_task);
 }
 
 void Scheduler::add_task(std::shared_ptr<Task> task) {
 	tasks.push_back(task);
 	running_tasks.push_back(task);
+}
+
+void Scheduler::block(task_state reason) {
+	assert(reason != task_state::READY && reason != task_state::RUNNING);
 }
 
 SchedulerLock Scheduler::lock() {
@@ -71,3 +89,4 @@ SchedulerLock::~SchedulerLock() {
 void SchedulerLock::print_tasks() { s->print_tasks(); }
 void SchedulerLock::add_task(std::shared_ptr<Task> task) { s->add_task(task); }
 void SchedulerLock::schedule() { s->schedule(); }
+void SchedulerLock::block(task_state reason) { s->block(reason); }
